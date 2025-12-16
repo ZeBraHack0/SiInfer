@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "siinfer-adapter"
+version = "0.1.0"
+description = "SiInfer benchmark adapter library"
+requires-python = ">=3.8"
+dependencies = []
+
+[tool.setuptools]
+packages = ["siinfer_adapter"]

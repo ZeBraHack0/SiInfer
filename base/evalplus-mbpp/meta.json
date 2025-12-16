@@ -1,0 +1,8 @@
+{
+  "group": "base",
+  "task_name": "evalplus-mbpp",
+  "optional_params": {
+    "MODEL_SIZE": "base",
+    "BENCHMARK": "mbpp"
+  }
+}

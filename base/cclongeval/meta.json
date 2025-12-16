@@ -1,0 +1,7 @@
+{
+  "group": "base",
+  "task_name": "cclongeval",
+  "optional_params": {
+    "EXTRA_BODY": "{'temperature':0.0,'top_p':0.95}"
+  }
+}

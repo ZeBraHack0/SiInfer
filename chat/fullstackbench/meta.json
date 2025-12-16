@@ -1,0 +1,10 @@
+{
+  "group": "chat",
+  "task_name": "fullstackbench",
+  "optional_params": {
+    "THREADS_NUM": "",
+    "MAX_TOKENS": "",
+    "TEMPERATURE": "",
+    "CODE_SERVER_URL": ""
+  }
+}

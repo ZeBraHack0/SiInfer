@@ -1,0 +1,8 @@
+{
+  "group": "chat",
+  "task_name": "codearena",
+  "optional_params": {
+    "JUDGE_BASE_URL": "https://console.siflow.cn/siflow/auriga/skyinfer/wzhang/qwen25-coder-ins/0/30000/v1",
+    "JUDGE_PI_KEY": "sk-abc123"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "group": "chat",
+  "task_name": "safim_chat",
+  "optional_params": {
+    "EXECEVAL_URL": "https://console.siflow.cn/siflow/auriga/skyinfer/xdma/safim-code-eval/test/30000",
+    "TOKENIZER_PATH": "/volume/pt-train/models/deepseek-coder-33b-instruct",
+    "SPECIAL_TOKENS": "{'fim_prefix_token':'<｜fim▁begin｜>','fim_middle_token':'<｜fim▁hole｜>','fim_suffix_token':'<｜fim▁end｜>'}",
+    "BAN_TOKENS": "['#','Ġ#','/*','Ġ/*']"
+  }
+}

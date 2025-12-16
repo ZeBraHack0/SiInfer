@@ -1,0 +1,7 @@
+{
+  "group": "base",
+  "task_name": "multiple",
+  "optional_params": {
+    "MODE": "base"
+  }
+}

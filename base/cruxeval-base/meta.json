@@ -1,0 +1,8 @@
+{
+  "group": "base",
+  "task_name": "cruxeval-base",
+  "optional_params": {
+    "TEMPERATURE": "0",
+    "N_SAMPLES": "1"
+  }
+}

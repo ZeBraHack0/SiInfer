@@ -1,0 +1,9 @@
+{
+  "group": "chat",
+  "task_name": "bigcodebench-chat",
+  "optional_params": {
+    "TEMPERATURE": "",
+    "N_SAMPLES": "",
+    "EXTRA_BODY": "{'max_tokens':8192}"
+  }
+}

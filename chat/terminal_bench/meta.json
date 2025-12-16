@@ -1,0 +1,10 @@
+{
+  "group": "chat",
+  "task_name": "terminal_bench",
+  "optional_params": {
+    "THREADS_NUM": "",
+    "AGENT_NAME": "",
+    "DATASET_NAME": "",
+    "DATASET_VERSION": ""
+  }
+}

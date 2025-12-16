@@ -1,0 +1,27 @@
+{
+  "__comment__": [
+    "value 支持两种：",
+    "1) \"path/to/requirements.txt\"  (旧格式，仅指定 requirements)",
+    "2) {\"requirements\": \"...\", \"python\": \"3.10\"}  (新格式，可同时指定 python)",
+    "",
+    "key 支持四种：",
+    "1) task_id: \"base__cceval\"",
+    "2) group/task_name: \"base/cceval\"",
+    "3) task_name: \"cceval\"",
+    "4) group dict: {\"base\": {\"cceval\": ...}}",
+    "",
+    "requirements 取值：",
+    "- 相对路径：优先相对 --qwencoder-root，其次相对 --config-root",
+    "- 绝对路径：/abs/path/to/requirements.txt",
+    "- \"\" 或 null：显式跳过该任务的依赖安装",
+    "",
+    "python 取值：",
+    "- \"3.10\" / \"python3.10\" / \"/usr/bin/python3.10\" 等，传给 uv venv --python"
+  ],
+
+  "base__cceval": { "requirements": "", "python": "3.10" },
+
+  "base": {},
+  "chat": {},
+  "tool": {}
+}

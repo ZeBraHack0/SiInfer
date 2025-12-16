@@ -1,0 +1,13 @@
+{
+  "group": "chat",
+  "task_name": "livecodebench",
+  "optional_params": {
+    "START_DATE": "",
+    "END_DATE": "",
+    "TEMPERATURE": "",
+    "TOP_P": "",
+    "MAX_TOKENS": "",
+    "MULTIPROCESS": "",
+    "RELEASE_VERSION": ""
+  }
+}

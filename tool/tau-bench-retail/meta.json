@@ -1,0 +1,10 @@
+{
+  "group": "tool",
+  "task_name": "tau-bench-retail",
+  "optional_params": {
+    "TASK": "retail",
+    "USER_STRATEGY": "llm",
+    "AGENT_STRATEGY": "tool-calling",
+    "NUM_THREADS": "50"
+  }
+}

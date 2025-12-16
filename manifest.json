@@ -1,0 +1,172 @@
+[
+  {
+    "group": "base",
+    "task_name": "evalplus-mbpp",
+    "dir": "/volume/bhzhao/SiInfer/base/evalplus-mbpp"
+  },
+  {
+    "group": "base",
+    "task_name": "evalplus-humaneval",
+    "dir": "/volume/bhzhao/SiInfer/base/evalplus-humaneval"
+  },
+  {
+    "group": "base",
+    "task_name": "multiple",
+    "dir": "/volume/bhzhao/SiInfer/base/multiple"
+  },
+  {
+    "group": "base",
+    "task_name": "bigcodebench-base",
+    "dir": "/volume/bhzhao/SiInfer/base/bigcodebench-base"
+  },
+  {
+    "group": "base",
+    "task_name": "cruxeval-base",
+    "dir": "/volume/bhzhao/SiInfer/base/cruxeval-base"
+  },
+  {
+    "group": "base",
+    "task_name": "cceval",
+    "dir": "/volume/bhzhao/SiInfer/base/cceval"
+  },
+  {
+    "group": "base",
+    "task_name": "cclongeval",
+    "dir": "/volume/bhzhao/SiInfer/base/cclongeval"
+  },
+  {
+    "group": "base",
+    "task_name": "hm_fim",
+    "dir": "/volume/bhzhao/SiInfer/base/hm_fim"
+  },
+  {
+    "group": "base",
+    "task_name": "repoeval",
+    "dir": "/volume/bhzhao/SiInfer/base/repoeval"
+  },
+  {
+    "group": "base",
+    "task_name": "safim",
+    "dir": "/volume/bhzhao/SiInfer/base/safim"
+  },
+  {
+    "group": "base",
+    "task_name": "repoqa",
+    "dir": "/volume/bhzhao/SiInfer/base/repoqa"
+  },
+  {
+    "group": "chat",
+    "task_name": "aider-polyglot-benchmark",
+    "dir": "/volume/bhzhao/SiInfer/chat/aider-polyglot-benchmark"
+  },
+  {
+    "group": "chat",
+    "task_name": "evalplus-mbpp",
+    "dir": "/volume/bhzhao/SiInfer/chat/evalplus-mbpp"
+  },
+  {
+    "group": "chat",
+    "task_name": "evalplus-humaneval",
+    "dir": "/volume/bhzhao/SiInfer/chat/evalplus-humaneval"
+  },
+  {
+    "group": "chat",
+    "task_name": "codearena",
+    "dir": "/volume/bhzhao/SiInfer/chat/codearena"
+  },
+  {
+    "group": "chat",
+    "task_name": "aideredit-diff",
+    "dir": "/volume/bhzhao/SiInfer/chat/aideredit-diff"
+  },
+  {
+    "group": "chat",
+    "task_name": "aideredit-whole",
+    "dir": "/volume/bhzhao/SiInfer/chat/aideredit-whole"
+  },
+  {
+    "group": "chat",
+    "task_name": "multiple",
+    "dir": "/volume/bhzhao/SiInfer/chat/multiple"
+  },
+  {
+    "group": "chat",
+    "task_name": "browsecomp",
+    "dir": "/volume/bhzhao/SiInfer/chat/browsecomp"
+  },
+  {
+    "group": "chat",
+    "task_name": "cruxeval-chat",
+    "dir": "/volume/bhzhao/SiInfer/chat/cruxeval-chat"
+  },
+  {
+    "group": "chat",
+    "task_name": "bigcodebench-chat",
+    "dir": "/volume/bhzhao/SiInfer/chat/bigcodebench-chat"
+  },
+  {
+    "group": "chat",
+    "task_name": "mind2web",
+    "dir": "/volume/bhzhao/SiInfer/chat/mind2web"
+  },
+  {
+    "group": "chat",
+    "task_name": "safim_chat",
+    "dir": "/volume/bhzhao/SiInfer/chat/safim_chat"
+  },
+  {
+    "group": "chat",
+    "task_name": "terminal_bench",
+    "dir": "/volume/bhzhao/SiInfer/chat/terminal_bench"
+  },
+  {
+    "group": "chat",
+    "task_name": "scicode",
+    "dir": "/volume/bhzhao/SiInfer/chat/scicode"
+  },
+  {
+    "group": "chat",
+    "task_name": "swe_verified",
+    "dir": "/volume/bhzhao/SiInfer/chat/swe_verified"
+  },
+  {
+    "group": "chat",
+    "task_name": "swe_lite",
+    "dir": "/volume/bhzhao/SiInfer/chat/swe_lite"
+  },
+  {
+    "group": "chat",
+    "task_name": "swe_live",
+    "dir": "/volume/bhzhao/SiInfer/chat/swe_live"
+  },
+  {
+    "group": "chat",
+    "task_name": "fullstackbench",
+    "dir": "/volume/bhzhao/SiInfer/chat/fullstackbench"
+  },
+  {
+    "group": "chat",
+    "task_name": "bird-spider",
+    "dir": "/volume/bhzhao/SiInfer/chat/bird-spider"
+  },
+  {
+    "group": "chat",
+    "task_name": "livecodebench",
+    "dir": "/volume/bhzhao/SiInfer/chat/livecodebench"
+  },
+  {
+    "group": "tool",
+    "task_name": "berkeley-function-call-leaderboard",
+    "dir": "/volume/bhzhao/SiInfer/tool/berkeley-function-call-leaderboard"
+  },
+  {
+    "group": "tool",
+    "task_name": "tau-bench-airline",
+    "dir": "/volume/bhzhao/SiInfer/tool/tau-bench-airline"
+  },
+  {
+    "group": "tool",
+    "task_name": "tau-bench-retail",
+    "dir": "/volume/bhzhao/SiInfer/tool/tau-bench-retail"
+  }
+]

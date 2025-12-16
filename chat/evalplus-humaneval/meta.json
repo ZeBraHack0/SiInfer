@@ -1,0 +1,8 @@
+{
+  "group": "chat",
+  "task_name": "evalplus-humaneval",
+  "optional_params": {
+    "MODEL_SIZE": "chat",
+    "BENCHMARK": "humaneval"
+  }
+}

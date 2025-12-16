@@ -1,0 +1,10 @@
+{
+  "group": "tool",
+  "task_name": "berkeley-function-call-leaderboard",
+  "optional_params": {
+    "TASK": "",
+    "THREADS_NUM": "",
+    "FC": "",
+    "TEMPERATURE": ""
+  }
+}

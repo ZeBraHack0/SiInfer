@@ -1,0 +1,14 @@
+{
+  "group": "chat",
+  "task_name": "bird-spider",
+  "optional_params": {
+    "TEMPERATURE": "",
+    "CONCURRENT_REQUESTS": "",
+    "MODE": "",
+    "NUM_THREADS": "",
+    "MODEL_MAX_LEN": "",
+    "EXTRA_HEADERS": "",
+    "EXTRA_BODY": "",
+    "EXTRA_QUERY": ""
+  }
+}

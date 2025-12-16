@@ -1,0 +1,7 @@
+{
+  "group": "chat",
+  "task_name": "multiple",
+  "optional_params": {
+    "MODE": "ins"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "group": "chat",
+  "task_name": "aideredit-diff",
+  "optional_params": {
+    "EDIT_FORMAT": "diff"
+  }
+}

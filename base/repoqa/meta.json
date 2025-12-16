@@ -1,0 +1,12 @@
+{
+  "group": "base",
+  "task_name": "repoqa",
+  "optional_params": {
+    "CODE_CONTEXT_SIZE": "16384",
+    "MAX_NEW_TOKENS": "1024",
+    "LANGUAGES": "None",
+    "LLM_TOKENIZER_PATH": "/volume/pt-train/models/Qwen2.5-Coder-32B",
+    "NUM_WORKERS": "32",
+    "API_MODEL_SIZE": "base"
+  }
+}

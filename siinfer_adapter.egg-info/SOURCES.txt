@@ -1,0 +1,7 @@
+pyproject.toml
+siinfer_adapter/__init__.py
+siinfer_adapter/adapter.py
+siinfer_adapter.egg-info/PKG-INFO
+siinfer_adapter.egg-info/SOURCES.txt
+siinfer_adapter.egg-info/dependency_links.txt
+siinfer_adapter.egg-info/top_level.txt

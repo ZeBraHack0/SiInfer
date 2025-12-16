@@ -1,0 +1,8 @@
+{
+  "group": "chat",
+  "task_name": "cruxeval-chat",
+  "optional_params": {
+    "TEMPERATURE": "",
+    "N_SAMPLES": ""
+  }
+}

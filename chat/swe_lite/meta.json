@@ -1,0 +1,20 @@
+{
+  "group": "chat",
+  "task_name": "swe_lite",
+  "optional_params": {
+    "THREADS_NUM": "",
+    "MODEL_MAX_LEN": "",
+    "BENCHMARK_PYTHON_SCRIPT_PATH": "",
+    "PROXY_MODE": "",
+    "TEMP": "",
+    "SCAFFOLD": "",
+    "DOCKER_HOST": "",
+    "MAX_STEPS": "",
+    "TEST_RATIO": "",
+    "BACKEND": "",
+    "DOCKER_IMAGE_FILE": "",
+    "EXTRA_HEADERS": "",
+    "EXTRA_BODY": "",
+    "EXTRA_QUERY": ""
+  }
+}

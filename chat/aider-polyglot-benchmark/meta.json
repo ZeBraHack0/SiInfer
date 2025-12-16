@@ -1,0 +1,12 @@
+{
+  "group": "chat",
+  "task_name": "aider-polyglot-benchmark",
+  "optional_params": {
+    "THREADS_NUM": "30",
+    "MODEL_MAX_LEN": "",
+    "BENCHMARK_PYTHON_SCRIPT_PATH": "",
+    "PROXY_MODE": "",
+    "HACK_PROXY": "",
+    "AIDER_PARAMS": ""
+  }
+}
