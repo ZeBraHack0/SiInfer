@@ -1,100 +1,113 @@
-# eval_plus/api/evalplus_adapter.py
-import os
 import json
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+import os
+from typing import Any, Dict, List, Tuple
+import re
+from typing import Iterator, Optional
+from siinfer_adapter import BenchmarkAdapter
 
-from benchmark_adapter import BenchmarkAdapter  # <- 你那份基类放哪就改哪
 
-def _read_jsonl(path: str) -> Iterable[Dict[str, Any]]:
+def _read_jsonl(path: str) -> Iterator[Dict[str, Any]]:
     with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
+        for ln in f:
+            ln = ln.strip()
+            if not ln:
                 continue
-            yield json.loads(line)
+            yield json.loads(ln)
 
 def _parse_rid_num(rid: str) -> int:
-    # rid 形如 "evalplus-mbpp/00000012"
-    try:
-        return int(rid.split("/")[-1])
-    except Exception:
-        return 10**18
-
-def _extract_text(obj: Any) -> str:
     """
-    尽量兼容多种 responses.jsonl 结构：
-    - {"id":..., "text": "..."}
-    - {"id":..., "completion": "..."}
-    - {"id":..., "output": "..."}
-    - {"id":..., "choices":[{"text":...}]}
-    - {"id":..., "choices":[{"message":{"content":...}}]}
-    - {"id":..., "response": {...}}  (递归)
+    rid 形如: evalplus-mbpp/00000000
     """
-    if obj is None:
-        return ""
-    if isinstance(obj, str):
-        return obj
-    if isinstance(obj, dict):
-        for k in ("text", "completion", "output", "generated_text", "content"):
-            v = obj.get(k)
-            if isinstance(v, str):
-                return v
-        if isinstance(obj.get("message"), dict) and isinstance(obj["message"].get("content"), str):
-            return obj["message"]["content"]
-        if isinstance(obj.get("choices"), list) and obj["choices"]:
-            c0 = obj["choices"][0]
-            if isinstance(c0, dict):
-                if isinstance(c0.get("text"), str):
-                    return c0["text"]
-                if isinstance(c0.get("message"), dict) and isinstance(c0["message"].get("content"), str):
-                    return c0["message"]["content"]
-        if isinstance(obj.get("response"), dict):
-            return _extract_text(obj["response"])
-    return ""
+    m = re.search(r"/(\d+)$", rid)
+    return int(m.group(1)) if m else 0
 
-class EvalPlusAdapter(BenchmarkAdapter):
+
+def _load_vllm_bench_result_texts(path: str) -> Tuple[List[str], List[str]]:
+    """
+    vllm bench serve --save-result 的 result-filename 文件：
+      - 单个 JSON dict
+      - generated_texts: list[str]
+      - errors: list[str]
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        obj = json.load(f)
+
+    texts = obj.get("generated_texts")
+    if not isinstance(texts, list):
+        raise ValueError(f"invalid vllm result: missing generated_texts in {path}")
+
+    errs = obj.get("errors", [""] * len(texts))
+    if not isinstance(errs, list) or len(errs) != len(texts):
+        errs = [""] * len(texts)
+
+    # 规范化为 str
+    out_texts: List[str] = []
+    for t in texts:
+        out_texts.append("" if t is None else str(t))
+
+    out_errs: List[str] = []
+    for e in errs:
+        out_errs.append("" if e is None else str(e))
+
+    return out_texts, out_errs
+
+
+class Adapter(BenchmarkAdapter):
     """
     目标：pull 阶段生成的 samples/<p_name>/<sidx>.py 与原 generate.py 逻辑完全一致
     """
-    eval_input_ext = "jsonl"  # pull() 会返回 run_dir/eval_input.jsonl；内容用于 debug
+    eval_input_ext = "jsonl"
 
     def materialize_eval_input(
         self,
-        responses_path: str,
+        responses_path: str,  # 现在传 vllm bench 的 result-filename（JSON，不是 jsonl）
         meta_path: str,
         out_path: str,
         cfg: Dict[str, Any],
     ) -> None:
-        # cfg 里必须给 workdir（即 generate.py 里的 --root，通常是 .../run_xxx/samples）
         workdir = cfg["workdir"]
         os.makedirs(workdir, exist_ok=True)
 
-        # 1) 读 responses：id -> response_obj
-        resp_map: Dict[str, Any] = {}
-        for row in _read_jsonl(responses_path):
-            rid = row.get("id")
-            if not rid:
-                continue
-            resp_map[rid] = row
+        # 0) 读 vllm bench result：按数据集顺序排列的输出
+        gen_texts, gen_errs = _load_vllm_bench_result_texts(responses_path)
 
-        # 2) 读 meta：按 task_id 分组，并按 rid 的全局递增顺序排列（复刻“生成顺序”）
+        # 1) 读 meta：收集全局顺序（用 rid_num 排序对齐 vllm 输出顺序）
         # meta.jsonl 行：{"id": rid, "meta": {...}}
+        meta_items: List[Tuple[int, str, Dict[str, Any]]] = []
         groups: Dict[str, List[Tuple[int, str, Dict[str, Any]]]] = {}
+
         for row in _read_jsonl(meta_path):
             rid = row.get("id")
             m = row.get("meta") or {}
             task_id = m.get("task_id")
             if not rid or not task_id:
                 continue
-            groups.setdefault(task_id, []).append((_parse_rid_num(rid), rid, m))
+            rid_num = _parse_rid_num(rid)
+            meta_items.append((rid_num, rid, m))
+            groups.setdefault(task_id, []).append((rid_num, rid, m))
 
-        # 3) 对每个 task：严格复刻 generate 写文件逻辑
+        meta_items.sort(key=lambda x: x[0])
+
+        # 2) 对齐：第 i 条 meta <-> 第 i 条 generated_texts
+        # 兼容长度不一致：越界当空；errors 非空也当空（算 missing）
+        resp_map: Dict[str, str] = {}
+        n_pair = min(len(meta_items), len(gen_texts))
+
+        for i, (_, rid, _) in enumerate(meta_items):
+            if i < len(gen_texts):
+                if i < len(gen_errs) and gen_errs[i]:
+                    resp_map[rid] = ""
+                else:
+                    resp_map[rid] = gen_texts[i]
+            else:
+                resp_map[rid] = ""
+
+        # 3) 写 samples/<p_name>/<sidx>.py（严格复刻 generate.py 处理逻辑）
         summary: List[Dict[str, Any]] = []
 
         for task_id, items in groups.items():
-            items.sort(key=lambda x: x[0])  # 按 rid_num 排序，保证与 iterate_request 发出的顺序一致
+            items.sort(key=lambda x: x[0])  # rid_num 递增
 
-            # 从首条 meta 取固定信息
             _, _, m0 = items[0]
             p_name = m0["p_name"]
             task_prompt = m0.get("task_prompt", "")
@@ -110,17 +123,12 @@ class EvalPlusAdapter(BenchmarkAdapter):
 
             for _, rid, m in items:
                 n_total += 1
-                r = resp_map.get(rid)
-                if r is None:
+                impl = resp_map.get(rid, "")
+                if not impl:
                     n_missing_resp += 1
-                    impl = ""
-                else:
-                    impl = _extract_text(r)
 
-                # === 复刻 decoder._post_process_generation：tab -> spaces ===
                 impl = (impl or "").replace("\t", "    ")
 
-                # === 下面这段：逐行逐句复刻 generate.py 里的处理逻辑（你贴的那段） ===
                 if "```python" in impl:
                     start = impl.find("```python") + 9
                     end = impl.find("```", start)
@@ -128,20 +136,22 @@ class EvalPlusAdapter(BenchmarkAdapter):
                         impl = impl[start:end].strip()
                     else:
                         impl = impl[start:].strip()
-                    # print("Extracted code from python block.")  # 这里不强制 print，避免刷屏
-
                 elif "```" in impl:
                     impl = impl.split("```")[0]
-                    # print("``` exist in generation. Please check the generation results.")
+
+                # 关键：如果 direct_completion=True，但模型输出已经包含 task_prompt 前缀，避免重复拼接
+                if direct_completion:
+                    if task_prompt and impl.startswith(task_prompt):
+                        content = impl
+                    else:
+                        content = task_prompt + impl
+                else:
+                    content = impl
 
                 try:
                     with open(os.path.join(task_dir, f"{sidx}.py"), "w", encoding="utf-8") as f:
-                        if direct_completion:
-                            f.write(task_prompt + impl)
-                        else:
-                            f.write(impl)
+                        f.write(content)
                 except UnicodeEncodeError:
-                    # === 复刻 generate：continue 且不递增 sidx ===
                     continue
 
                 sidx += 1
@@ -156,11 +166,12 @@ class EvalPlusAdapter(BenchmarkAdapter):
                 "num_written": n_written,
                 "num_missing_resp": n_missing_resp,
                 "workdir": workdir,
+                "vllm_num_prompts": len(gen_texts),
+                "vllm_num_paired": n_pair,
             })
 
-        # 4) out_path 写一份 debug 用 jsonl（不影响 evaluator；evaluator 继续读 samples/ 目录）
+        # 4) debug jsonl
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         with open(out_path, "w", encoding="utf-8") as f:
             for row in summary:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
-

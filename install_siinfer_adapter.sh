@@ -5,6 +5,12 @@ PY_BIN="${1:-python3}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${ROOT_DIR}"
 
+if ! command -v "${PY_BIN}" >/dev/null 2>&1 && [[ ! -x "${PY_BIN}" ]]; then
+  echo "[ERR] PY_BIN not found or not executable: ${PY_BIN}"
+  exit 2
+fi
+
+
 if [[ ! -f "${ROOT_DIR}/adapter.py" ]]; then
   echo "[ERR] adapter.py not found under ${ROOT_DIR}"
   exit 1
@@ -57,11 +63,11 @@ fi
 
 # 4) install (editable)
 if command -v uv >/dev/null 2>&1; then
-  uv pip install -e .
+  uv pip install --python "${PY_BIN}" -e .
 else
   "${PY_BIN}" -m pip install -e .
 fi
 
 echo "[OK] Installed. Quick test:"
-echo "  python -c \"import siinfer_adapter; print(siinfer_adapter.get_benchmark_adapter)\""
+"${PY_BIN}" -c "import siinfer_adapter; print(siinfer_adapter.get_benchmark_adapter)"
 

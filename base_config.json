@@ -1,0 +1,21 @@
+{
+    "backend": ["vllm"],
+    "model": ["Qwen2.5-Coder-32B"],
+    "mode": "online",
+    "parallel": ["2:1:4"],
+    "batch": [1536],
+    "num_prompt": [0],
+    "input": ["requests.jsonl"],
+    "output": "~/.etc",
+    "datapath": "/volume/bhzhao/workspace/base__evalplus-mbpp/adapter_runs/run_20251217_103026/evalplus-mbpp",
+    "rate": ["inf"],
+    "worker": [],
+    "role": "client",
+    "client_extra": [
+        {
+            "backend": "vllm"
+        }
+    ],
+    "override":   false,
+    "validation": false
+}

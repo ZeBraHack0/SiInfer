@@ -155,13 +155,14 @@ class BenchmarkAdapter:
         self._finalize_requests()
 
         ready_resp = os.path.join(self.run_dir, RESPONSE_READY)
+        print("--- waiting for inference results ---")
         start = time.time()
         while not os.path.exists(ready_resp):
             if timeout_s is not None and (time.time() - start) > timeout_s:
                 raise TimeoutError(f"Timeout waiting for {ready_resp}")
             time.sleep(poll_interval_s)
 
-        responses_path = os.path.join(self.run_dir, "responses.jsonl")
+        responses_path = os.path.join(self.run_dir, "responses.json")
         meta_path = os.path.join(self.run_dir, "meta.jsonl")
         eval_input_path = os.path.join(self.run_dir, f"eval_input.{self.eval_input_ext}")
         self.materialize_eval_input(responses_path, meta_path, eval_input_path, cfg)

@@ -19,6 +19,54 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 # basic utils
 # ----------------------------
 
+PYPI_INDEX_URL = "https://mirrors.aliyun.com/pypi/simple"
+
+
+def sha256_if_exists(p: Optional[Path]) -> str:
+    if not p:
+        return ""
+    try:
+        return sha256_file(p) if p.exists() else ""
+    except Exception:
+        return ""
+
+
+def detect_editable_project_fingerprint(project_root: Optional[Path]) -> Dict[str, str]:
+    """
+    检测 bench 目录是否需要 `pip install -e .`（setup.py/setup.cfg/pyproject.toml 任一存在就认为可安装）
+    同时返回用于 fingerprint 的信息（文件 sha）。
+    """
+    if not project_root:
+        return {
+            "editable_project_root": "",
+            "editable_enabled": "0",
+            "setup_py_sha256": "",
+            "setup_cfg_sha256": "",
+            "pyproject_sha256": "",
+        }
+
+    setup_py = project_root / "setup.py"
+    setup_cfg = project_root / "setup.cfg"
+    pyproject = project_root / "pyproject.toml"
+
+    editable = any(p.exists() for p in [setup_py, setup_cfg, pyproject])
+    return {
+        "editable_project_root": str(project_root.resolve()),
+        "editable_enabled": "1" if editable else "0",
+        "setup_py_sha256": sha256_if_exists(setup_py),
+        "setup_cfg_sha256": sha256_if_exists(setup_cfg),
+        "pyproject_sha256": sha256_if_exists(pyproject),
+    }
+
+
+def fingerprint_matches(old: Dict[str, Any], new: Dict[str, Any]) -> bool:
+    # 只要求 old 至少包含 new 的全部 key 且值相等；old 多余字段不影响
+    try:
+        return all(old.get(k) == v for k, v in new.items())
+    except Exception:
+        return False
+
+
 def _tail_file(path: Path, n_lines: int = 120) -> str:
     try:
         if not path.exists():
@@ -36,7 +84,7 @@ def run_cmd(
     stdout_path: Optional[Path] = None,
     stderr_path: Optional[Path] = None,
     check: bool = True,
-    timeout_sec: int = 0,   # 0 means no timeout
+    timeout_sec: int = 0,
 ) -> int:
     p = subprocess.Popen(
         cmd,
@@ -163,10 +211,6 @@ def extract_vars_from_cmd(cmd: str) -> Dict[str, str]:
 
 
 def find_requirements_file(qwencoder_root: Path, benchmark_root_dir: str) -> Optional[Path]:
-    """
-    默认探测规则：优先 benchmark_root_dir/requirements.txt
-    其次 benchmark_root_dir/requirements/requirements.txt
-    """
     if not benchmark_root_dir:
         return None
     cand1 = qwencoder_root / benchmark_root_dir / "requirements.txt"
@@ -218,9 +262,6 @@ def _literal_eval_return_list_from_func(tree: ast.AST, func_name: str) -> Option
 
 
 def load_tasks_from_task_define(task_define_path: Path, groups: List[str]) -> List[Dict[str, Any]]:
-    """
-    返回：[{group, task_name, task_id, optional_params}, ...]
-    """
     src = task_define_path.read_text(encoding="utf-8", errors="ignore")
     tree = ast.parse(src, filename=str(task_define_path))
 
@@ -259,7 +300,7 @@ def load_tasks_from_task_define(task_define_path: Path, groups: List[str]) -> Li
 
 
 # ----------------------------
-# task-config.json (mapping only)
+# task-config.json
 # ----------------------------
 
 @dataclass
@@ -279,11 +320,9 @@ def load_task_config(task_config_path: Path) -> Dict[str, TaskConfig]:
     for task_name, cfg in data.items():
         if not isinstance(cfg, dict):
             continue
-        # 保留 JSON dict 的插入顺序（Python 3.7+）
         dp = cfg.get("default_params", {}) or {}
         if not isinstance(dp, dict):
             dp = {}
-
         out[str(task_name)] = TaskConfig(
             yaml_template=cfg.get("yaml_template"),
             benchmark_root_dir=str(cfg.get("benchmark_root_dir", "")),
@@ -294,29 +333,27 @@ def load_task_config(task_config_path: Path) -> Dict[str, TaskConfig]:
 
 
 # ----------------------------
-# requirements/python override map
+# requirements/python override map (保留但不改“显式skip”语义)
 # ----------------------------
 
 ReqItem = Union[str, None, Dict[str, Any]]
 ReqMapType = Dict[str, Union[ReqItem, Dict[str, ReqItem]]]
 
 
-def load_requirements_map(path: Optional[str]) -> Optional[ReqMapType]:
+def load_requirements_map(path: Optional[str]) -> Tuple[Optional[ReqMapType], Optional[Path]]:
     if not path:
-        return None
+        return None, None
     p = Path(path).expanduser().resolve()
     if not p.exists():
         raise FileNotFoundError(f"--requirements-map not found: {p}")
     obj = json.loads(p.read_text(encoding="utf-8"))
     if not isinstance(obj, dict):
         raise ValueError("--requirements-map must be a JSON dict")
-    return obj
+    return obj, p.parent.resolve()
+
 
 
 def _parse_req_item(item: ReqItem) -> Tuple[Optional[str], Optional[str]]:
-    """
-    returns (requirements_path_str_or_None, python_spec_or_None)
-    """
     if item is None:
         return None, None
     if isinstance(item, str):
@@ -331,12 +368,10 @@ def _parse_req_item(item: ReqItem) -> Tuple[Optional[str], Optional[str]]:
             req = req.strip() or None
         else:
             req = (str(req).strip() if req is not None else None) or None
-
         if isinstance(py, str):
             py = py.strip() or None
         else:
             py = (str(py).strip() if py is not None else None) or None
-
         return req, py
     return None, None
 
@@ -344,16 +379,42 @@ def _parse_req_item(item: ReqItem) -> Tuple[Optional[str], Optional[str]]:
 def _resolve_path_maybe_relative(
     chosen: str,
     *,
+    bench_abs_dir: Optional[Path],
     qwencoder_root: Path,
     config_root: Path,
+    req_map_root: Optional[Path] = None,
 ) -> Path:
     p = Path(chosen).expanduser()
     if p.is_absolute():
         return p
-    p1 = (qwencoder_root / chosen).resolve()
-    if p1.exists():
-        return p1
+
+    # ✅ 1) benchmark 根目录优先
+    if bench_abs_dir is not None:
+        p0 = (bench_abs_dir / chosen).resolve()
+        if p0.exists():
+            return p0
+
+    # 2) requirements-map.json 所在目录
+    if req_map_root is not None:
+        p1 = (req_map_root / chosen).resolve()
+        if p1.exists():
+            return p1
+
+    # 3) qwencoder_root
+    p2 = (qwencoder_root / chosen).resolve()
+    if p2.exists():
+        return p2
+
+    # 4) config_root
+    p3 = (config_root / chosen).resolve()
+    if p3.exists():
+        return p3
+
+    # 5) 都不存在：回落到 bench 目录拼出来的路径
+    if bench_abs_dir is not None:
+        return (bench_abs_dir / chosen).resolve()
     return (config_root / chosen).resolve()
+
 
 
 def resolve_overrides(
@@ -364,49 +425,48 @@ def resolve_overrides(
     task_name: str,
     qwencoder_root: Path,
     config_root: Path,
+    req_map_root: Optional[Path],
+    bench_abs_dir: Optional[Path],   # ✅ 新增
 ) -> Tuple[Optional[Path], str, Optional[str], str]:
-    """
-    返回：
-      (requirements_path_or_None, requirements_source, python_spec_or_None, python_source)
-
-    key 优先级：
-      1) task_id
-      2) group/task_name
-      3) task_name
-      4) group dict[group][task_name]
-    """
     if not req_map:
         return None, "", None, ""
 
     keys = [task_id, f"{group}/{task_name}", task_name]
-
     for k in keys:
         v = req_map.get(k)
         if v is None:
             continue
         req_s, py_s = _parse_req_item(v)
-        req_p = _resolve_path_maybe_relative(req_s, qwencoder_root=qwencoder_root, config_root=config_root) if req_s else None
+        req_p = _resolve_path_maybe_relative(
+            req_s,
+            bench_abs_dir=bench_abs_dir,
+            qwencoder_root=qwencoder_root,
+            config_root=config_root,
+            req_map_root=req_map_root,
+        ) if req_s else None
         return req_p, f"override({k})", py_s, f"override({k})"
 
     gv = req_map.get(group)
     if isinstance(gv, dict) and task_name in gv:
         v = gv.get(task_name)
         req_s, py_s = _parse_req_item(v)
-        req_p = _resolve_path_maybe_relative(req_s, qwencoder_root=qwencoder_root, config_root=config_root) if req_s else None
+        req_p = _resolve_path_maybe_relative(
+            req_s,
+            bench_abs_dir=bench_abs_dir,
+            qwencoder_root=qwencoder_root,
+            config_root=config_root,
+            req_map_root=req_map_root,
+        ) if req_s else None
         return req_p, f"override({group}.{task_name})", py_s, f"override({group}.{task_name})"
 
     return None, "", None, ""
 
 
 # ----------------------------
-# imageVersion helper (match TaskConfigManager)
+# imageVersion helper
 # ----------------------------
 
 def parse_image_version_from_yaml(yaml_path: Optional[Path]) -> Optional[str]:
-    """
-    尽量复刻 TaskConfigManager:
-      imageVersion = imageUrl.split(":")[-1].split('-')[0]
-    """
     if not yaml_path or (not yaml_path.exists()):
         return None
     try:
@@ -428,7 +488,6 @@ def parse_image_version_from_yaml(yaml_path: Optional[Path]) -> Optional[str]:
         except Exception:
             pass
 
-    # fallback: imageVersion:
     for ln in text.splitlines():
         s = ln.strip()
         if s.startswith("imageVersion:"):
@@ -438,15 +497,11 @@ def parse_image_version_from_yaml(yaml_path: Optional[Path]) -> Optional[str]:
 
 
 def version_ge(v: str, base: str = "1.1") -> bool:
-    """
-    轻量版本比较：提取数字段，按 (major, minor, patch) 比较。
-    """
     def to_tuple(x: str) -> Tuple[int, int, int]:
         parts = re.split(r"[^\d]+", x)
         nums = [int(p) for p in parts if p != ""]
         nums = (nums + [0, 0, 0])[:3]
         return (nums[0], nums[1], nums[2])
-
     try:
         return to_tuple(v) >= to_tuple(base)
     except Exception:
@@ -454,12 +509,46 @@ def version_ge(v: str, base: str = "1.1") -> bool:
 
 
 # ----------------------------
+# SiInfer install + run.sh integration
+# ----------------------------
+
+def install_siinfer_adapter(
+    *,
+    install_script: Path,
+    venv_py: Path,
+    marker_path: Path,
+    stdout_path: Path,
+    stderr_path: Path,
+) -> None:
+    """
+    在每个 venv 里安装 siinfer adapter（幂等：用 marker 防重复）
+    """
+    if marker_path.exists():
+        return
+    if not install_script.exists():
+        raise FileNotFoundError(f"SiInfer install script not found: {install_script}")
+    if not venv_py.exists():
+        raise FileNotFoundError(f"venv python not found: {venv_py}")
+
+    print(f"[INFO] install siinfer adapter via: bash {install_script} {venv_py}")
+    run_cmd(
+        ["bash", str(install_script), str(venv_py)],
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        check=True,
+    )
+    write_text(marker_path, json.dumps({"installed": True, "venv_python": str(venv_py)}, indent=2))
+
+
+# ----------------------------
 # run.sh generator (match TaskConfigManager.generate_cmd semantics)
 # ----------------------------
 
 def generate_run_sh(
+    *,
     task_id: str,
     task_name: str,
+    group: str,
     task_optional_params: Dict[str, str],
     cfg: TaskConfig,
     config_root: Path,
@@ -469,14 +558,16 @@ def generate_run_sh(
     default_model_name: str,
     default_openai_base_url: str,
     default_openai_api_key: str,
+    # siinfer knobs
+    siinfer_repo_root: str,
+    siinfer_adapter_enable: str = "1",
 ) -> Tuple[str, Dict[str, str]]:
 
-    # 读取 yaml_template：仅用于补全 meta_vars / imageVersion（不依赖 cmd 内容生成）
     cmd_text = None
     meta_vars: Dict[str, str] = {}
-
     yaml_path = None
     image_ver = None
+
     if cfg.yaml_template:
         yaml_path = (config_root / cfg.yaml_template).resolve()
         if yaml_path.exists():
@@ -490,15 +581,14 @@ def generate_run_sh(
 
     unified_out_dir = (unified_output_root / task_id).resolve()
 
-    # ---- 0) effective default_params：复刻 TaskConfigManager 的 imageVersion>=1.1 注入 EXTRA_* ----
-    default_params_eff: Dict[str, str] = dict(cfg.default_params)  # 保留顺序的 copy
+    # imageVersion>=1.1 注入 EXTRA_*
+    default_params_eff: Dict[str, str] = dict(cfg.default_params)
     if image_ver and version_ge(image_ver, "1.1"):
         for k in ["EXTRA_HEADERS", "EXTRA_BODY", "EXTRA_QUERY"]:
             if k not in default_params_eff:
                 default_params_eff[k] = "None"
 
-    # ---- 1) resolved values：optional 覆盖 default（修复 base/chat 覆盖反了的问题） ----
-    # 只处理 default_params_eff 里存在的 key（与线上一致：optional 也必须在 default_params 里才会生效）
+    # optional 覆盖 default（与线上一致）
     resolved: Dict[str, str] = {}
     for k, default_v in default_params_eff.items():
         v = task_optional_params.get(k, default_v)
@@ -506,13 +596,11 @@ def generate_run_sh(
         if v != "":
             resolved[k] = v
 
-    # ---- 2) run.sh 里写变量默认值：允许外部 env 覆盖 ----
-    # 模拟线上：EXTRA_* 用 export，其它只是变量（但我们也可不 export）
     extra_keys = {"EXTRA_HEADERS", "EXTRA_BODY", "EXTRA_QUERY"}
 
     param_lines: List[str] = []
     export_lines: List[str] = []
-    for k, _ in default_params_eff.items():
+    for k in default_params_eff.keys():
         if k not in resolved:
             continue
         v = resolved[k]
@@ -520,23 +608,32 @@ def generate_run_sh(
         if k in extra_keys:
             export_lines.append(f'export {k}')
 
-    # ---- 3) 构造脚本参数：严格复刻 TaskConfigManager.script_args ----
-    # 固定 4 个，然后仅当 optional_params 显式提供了 param 且 param 不是 EXTRA_* 时追加
+    # script args（严格复刻 workflow）
     script_args: List[str] = [
         '"${MODEL_NAME}"',
         '"${OUTPUT_DIR}"',
         '"${OPENAI_BASE_URL}"',
         '"${OPENAI_API_KEY}"',
     ]
-
     for k in default_params_eff.keys():
         if k in extra_keys:
             continue
-        if task_optional_params.get(k):  # 只有 optional 显式非空提供才追加（与线上一致）
+        if task_optional_params.get(k):
             script_args.append(f'"${{{k}}}"')
 
-    # ---- 4) 统一生成启动命令（保证一定 cd） ----
-    # 注意：BENCHMARK_SCRIPT_PATH 在 cd 后作为相对路径运行
+    # SiInfer env：SII_ADAPTER_BASE_DIR = workspace/<task_id>/adapter_runs
+    # run.sh 本身放在 workspace/<task_id>/run.sh -> RUN_DIR 就是 workspace/<task_id>
+    siinfer_env_lines = [
+        f'export BENCH_ADAPTER_ENABLE={json.dumps(str(siinfer_adapter_enable))}',
+        f'export SII_ADAPTER_REPO_ROOT={json.dumps(str(siinfer_repo_root))}',
+        'RUN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+        'export SII_ADAPTER_BASE_DIR="${SII_ADAPTER_BASE_DIR:-"${RUN_DIR}/adapter_runs"}"',
+        'mkdir -p "${SII_ADAPTER_BASE_DIR}"',
+        'export SII_RUN_ID="${SII_RUN_ID:-"run_$(date +%Y%m%d_%H%M%S)"}"',
+        f'export SII_BENCH_NAME={json.dumps(str(task_name))}',
+        f'export SII_BENCH_GROUP={json.dumps(str(group))}',
+    ]
+
     launch_lines = [
         'cd "${REPO_ROOT}/${BENCHMARK_ROOT_DIR}"',
         f'bash "${{BENCHMARK_SCRIPT_PATH}}" {" ".join(script_args)} "$@"',
@@ -573,7 +670,10 @@ BENCHMARK_ROOT_DIR={json.dumps(bench_root)}
 BENCHMARK_SCRIPT_PATH={json.dumps(bench_script)}
 export BENCHMARK_ROOT_DIR BENCHMARK_SCRIPT_PATH
 
-# ---- default_params (TaskConfigManager semantics: optional overrides default; env-overridable here) ----
+# ---- SiInfer adapter env ----
+{os.linesep.join(siinfer_env_lines)}
+
+# ---- default_params (workflow semantics: optional overrides default; env-overridable here) ----
 {os.linesep.join(param_lines)}
 {os.linesep.join(export_lines)}
 
@@ -587,24 +687,18 @@ export BENCHMARK_ROOT_DIR BENCHMARK_SCRIPT_PATH
 {os.linesep.join(launch_lines)}
 """
 
-    entry_abs = ""
-    if bench_root and bench_script:
-        p = (qwencoder_root / bench_root / bench_script).resolve()
-        if p.exists():
-            entry_abs = str(p)
-
     meta = {
         "task_id": task_id,
         "task_name": task_name,
+        "group": group,
         "yaml_template": str(yaml_path) if yaml_path else "",
         "image_version": image_ver or "",
         "BENCHMARK_ROOT_DIR": bench_root,
         "BENCHMARK_SCRIPT_PATH": bench_script,
         "OUTPUT_DIR": str(unified_out_dir),
         "venv_dir": str(venv_dir),
-        "entry_abs": entry_abs,
-        "default_params_effective_keys": json.dumps(list(default_params_eff.keys()), ensure_ascii=False),
-        "resolved_params": json.dumps(resolved, ensure_ascii=False),
+        "siinfer_repo_root": str(siinfer_repo_root),
+        "siinfer_adapter_enable": str(siinfer_adapter_enable),
         "script_args": json.dumps(script_args, ensure_ascii=False),
     }
     return run_sh, meta
@@ -617,13 +711,6 @@ def ensure_pip_in_venv(
     stderr_path: Path,
     uv_timeout_sec: int = 0,
 ) -> None:
-    """
-    Ensure `pip` module exists in this venv.
-    Strategy:
-      1) python -m pip --version
-      2) python -m ensurepip --upgrade
-      3) python -m pip --version
-    """
     if not venv_py.exists():
         raise FileNotFoundError(f"venv python not found: {venv_py}")
 
@@ -662,7 +749,7 @@ def main() -> None:
     ap.add_argument("--workspace", required=True, help="Where to put per-task folders (run.sh, logs, meta)")
     ap.add_argument("--venv-root", required=True, help="Where to create per-task uv venvs")
     ap.add_argument("--output-root", required=True, help="Unified output root dir; each task uses output-root/<task_id>")
-    ap.add_argument("--python", default="", help="Default python for uv venv (can be overridden per-task via requirements-map), e.g. 3.10/python3.10")
+    ap.add_argument("--python", default="", help="Default python for uv venv (can be overridden per-task via requirements-map)")
     ap.add_argument("--model-name", default="dummy-model", help="Default MODEL_NAME used in run.sh (can override at runtime)")
     ap.add_argument("--openai-base-url", default="http://127.0.0.1:8000/v1", help="Default OPENAI_BASE_URL used in run.sh")
     ap.add_argument("--openai-api-key", default="EMPTY", help="Default OPENAI_API_KEY used in run.sh")
@@ -683,6 +770,12 @@ def main() -> None:
         default=0,
         help="Timeout seconds for uv pip install in auto/uv mode; 0 means no timeout.",
     )
+
+    # ---- SiInfer integration knobs (带默认值，方便你以后迁移路径) ----
+    ap.add_argument("--siinfer-repo-root", default="/volume/bhzhao/SiInfer", help="SiInfer repo root (exported as SII_ADAPTER_REPO_ROOT)")
+    ap.add_argument("--siinfer-adapter-enable", default="1", help="BENCH_ADAPTER_ENABLE value (default 1)")
+
+
     args = ap.parse_args()
 
     if shutil.which("uv") is None:
@@ -703,7 +796,11 @@ def main() -> None:
     if not qwencoder_root.exists():
         raise FileNotFoundError(f"qwencoder-root not found: {qwencoder_root}")
 
-    req_map = load_requirements_map(args.requirements_map) if args.requirements_map else None
+    if args.requirements_map:
+        req_map, req_map_root = load_requirements_map(args.requirements_map)
+    else:
+        req_map, req_map_root = None, None
+
 
     groups = [g.strip() for g in args.groups.split(",") if g.strip()]
     tasks = load_tasks_from_task_define(task_define_path, groups)
@@ -715,6 +812,13 @@ def main() -> None:
 
     results: Dict[str, Any] = {}
     total = len(tasks)
+
+    siinfer_repo_root = Path(args.siinfer_repo_root).expanduser().resolve()
+    install_script = (siinfer_repo_root / "install_siinfer_adapter.sh").resolve()
+    if not install_script.exists():
+        raise FileNotFoundError(f"SiInfer install script not found: {install_script}")
+
+
 
     for idx, t in enumerate(tasks, start=1):
         task_id = t["task_id"]
@@ -733,6 +837,7 @@ def main() -> None:
         run_err = task_dir / "run.stderr.txt"
         req_fingerprint_path = task_dir / "requirements.fingerprint.json"
         python_spec_path = task_dir / "venv.python_spec.txt"
+        siinfer_marker = task_dir / "siinfer.installed.json"
 
         if task_name not in task_cfg_map:
             msg = f"task-config.json missing entry for {task_name}"
@@ -742,12 +847,12 @@ def main() -> None:
 
         cfg = task_cfg_map[task_name]
         bench_root = normalize_qwencoder_path(cfg.benchmark_root_dir)
+        bench_abs_dir = (qwencoder_root / bench_root).resolve() if bench_root else None
 
-        # venv paths
+
         venv_dir = venv_root / task_id
         venv_py = venv_dir / "bin" / "python"
 
-        # overrides: requirements + python
         req_override, req_source, py_override, py_source = resolve_overrides(
             req_map,
             task_id=task_id,
@@ -755,9 +860,11 @@ def main() -> None:
             task_name=task_name,
             qwencoder_root=qwencoder_root,
             config_root=config_root,
+            req_map_root=req_map_root,
+            bench_abs_dir=bench_abs_dir, 
         )
 
-        # desired python: per-task override > global --python > None
+
         desired_python = (py_override or "").strip() or (args.python or "").strip() or None
         if desired_python:
             print(f"[INFO] python({py_source or 'default(--python)'}) = {desired_python}")
@@ -769,20 +876,21 @@ def main() -> None:
             if args.force_reinstall and venv_dir.exists():
                 print(f"[INFO] --force-reinstall: destroy venv: {venv_dir}")
                 shutil.rmtree(venv_dir, ignore_errors=True)
-                if req_fingerprint_path.exists():
-                    req_fingerprint_path.unlink(missing_ok=True)
-                if python_spec_path.exists():
-                    python_spec_path.unlink(missing_ok=True)
+                for p in [req_fingerprint_path, python_spec_path, siinfer_marker]:
+                    if p.exists():
+                        p.unlink(missing_ok=True)
 
             if venv_dir.exists() and not venv_py.exists():
                 print(f"[WARN] venv dir exists but python missing -> recreate: {venv_dir}")
                 shutil.rmtree(venv_dir, ignore_errors=True)
+                siinfer_marker.unlink(missing_ok=True)
 
             if venv_dir.exists() and desired_python and python_spec_path.exists():
                 old_spec = python_spec_path.read_text(encoding="utf-8", errors="ignore").strip()
                 if old_spec and old_spec != desired_python:
                     print(f"[WARN] python spec changed ({old_spec} -> {desired_python}) -> recreate venv")
                     shutil.rmtree(venv_dir, ignore_errors=True)
+                    siinfer_marker.unlink(missing_ok=True)
 
             if venv_dir.exists() and desired_python and re.match(r"^\d+\.\d+(\.\d+)?$", desired_python):
                 actual_mm = read_venv_python_major_minor(venv_py)
@@ -790,6 +898,7 @@ def main() -> None:
                 if actual_mm and actual_mm != want_mm:
                     print(f"[WARN] venv python mismatch (actual={actual_mm}, want={want_mm}) -> recreate venv")
                     shutil.rmtree(venv_dir, ignore_errors=True)
+                    siinfer_marker.unlink(missing_ok=True)
 
             if not venv_dir.exists():
                 cmd = ["uv", "venv", str(venv_dir)]
@@ -802,7 +911,7 @@ def main() -> None:
             else:
                 print(f"[INFO] venv exists: {venv_dir} (skip create)")
 
-        # 2) requirements path resolve (override -> auto-detect)
+        # 2) requirements resolve
         if req_override is not None:
             req = req_override
             req_source_final = req_source or "override(--requirements-map)"
@@ -817,87 +926,145 @@ def main() -> None:
             if not req.exists():
                 print(f"[WARN] requirements path does not exist: {req}")
 
-        # 2.5) install requirements (idempotent + fingerprint)
-        installed = False
+        # 2.5) install deps (ONE-SHOT): prefer requirements.txt; only if no requirements then try editable(-e .)
+        installed = False                 # requirements 是否安装过
+        editable_installed = False        # pip install -e . 是否安装过
         skipped_install = False
 
-        if (not args.dry_run) and (req is not None) and req.exists():
+        cwd_install = (qwencoder_root / bench_root) if bench_root else None
+
+        req_exists = (req is not None) and req.exists()
+
+        # 只有在没有 requirements 的时候，才考虑 editable install
+        editable_fp = detect_editable_project_fingerprint(cwd_install)
+        editable_enabled_raw = (editable_fp.get("editable_enabled") == "1")
+        editable_enabled = (editable_enabled_raw and (not req_exists))
+
+        # 最终安装模式：二选一
+        install_mode = "requirements" if req_exists else ("editable" if editable_enabled else "none")
+
+        if (not args.dry_run) and install_mode != "none":
             fp = {
-                "requirements_path": str(req.resolve()),
-                "sha256": sha256_file(req),
                 "venv_python": str(venv_py),
                 "python_spec": desired_python or "",
                 "install_method": args.install_method,
+
+                # 二选一模式标记（避免 requirements 存在时还去 fingerprint editable）
+                "install_mode": install_mode,
+
+                # requirements fingerprint（不存在就空）
+                "requirements_path": str(req.resolve()) if req_exists else "",
+                "requirements_sha256": sha256_file(req) if req_exists else "",
+
+                # editable fingerprint（仅 editable 模式才有意义；否则留空）
+                "editable_project_root": editable_fp.get("editable_project_root", "") if install_mode == "editable" else "",
+                "editable_enabled": "1" if install_mode == "editable" else "0",
+                "setup_py_sha256": editable_fp.get("setup_py_sha256", "") if install_mode == "editable" else "",
+                "setup_cfg_sha256": editable_fp.get("setup_cfg_sha256", "") if install_mode == "editable" else "",
+                "pyproject_sha256": editable_fp.get("pyproject_sha256", "") if install_mode == "editable" else "",
             }
 
             if (not args.force_reinstall) and req_fingerprint_path.exists():
                 try:
                     old = json.loads(req_fingerprint_path.read_text(encoding="utf-8"))
-                    if (
-                        isinstance(old, dict)
-                        and old.get("requirements_path") == fp["requirements_path"]
-                        and old.get("sha256") == fp["sha256"]
-                        and (old.get("python_spec", "") == fp["python_spec"])
-                        and (old.get("install_method", "auto") == fp["install_method"])
-                    ):
-                        print("[INFO] requirements unchanged -> skip install")
+                    if isinstance(old, dict) and fingerprint_matches(old, fp):
+                        print(f"[INFO] deps unchanged -> skip install (mode={install_mode})")
                         skipped_install = True
                 except Exception:
                     pass
 
-            if not skipped_install:
-                cwd_install = (qwencoder_root / bench_root) if bench_root else None
+            def do_pip_requirements():
+                print("[INFO] ensure pip exists in venv ...")
+                ensure_pip_in_venv(Path(venv_py), cwd_install, setup_out, setup_err)
+                print("[INFO] install deps via: python -m pip install -r ...")
+                run_cmd(
+                    [str(venv_py), "-m", "pip", "install", "-r", str(req), "-i", PYPI_INDEX_URL],
+                    cwd=cwd_install,
+                    stdout_path=setup_out,
+                    stderr_path=setup_err,
+                    check=True,
+                )
 
-                def do_pip():
-                    print("[INFO] ensure pip exists in venv ...")
-                    ensure_pip_in_venv(
-                        Path(venv_py),
-                        cwd_install,
-                        setup_out,
-                        setup_err,
-                        uv_timeout_sec=int(args.uv_pip_timeout or 0),
-                    )
-                    print("[INFO] install deps via: python -m pip install -r ...")
-                    run_cmd(
-                        [str(venv_py), "-m", "pip", "install", "-r", str(req), "-i", "https://mirrors.aliyun.com/pypi/simple"],
-                        cwd=cwd_install,
-                        stdout_path=setup_out,
-                        stderr_path=setup_err,
-                        check=True,
-                    )
+            def do_uv_requirements():
+                print("[INFO] install deps via: uv pip install -r ...")
+                run_cmd(
+                    ["uv", "pip", "install", "--python", str(venv_py), "-r", str(req), "-i", PYPI_INDEX_URL],
+                    cwd=cwd_install,
+                    stdout_path=setup_out,
+                    stderr_path=setup_err,
+                    check=True,
+                    timeout_sec=int(args.uv_pip_timeout or 0),
+                )
 
-                def do_uv():
-                    print("[INFO] install deps via: uv pip install -r ...")
-                    run_cmd(
-                        ["uv", "pip", "install", "--python", str(venv_py), "-r", str(req), "-i", "https://mirrors.aliyun.com/pypi/simple"],
-                        cwd=cwd_install,
-                        stdout_path=setup_out,
-                        stderr_path=setup_err,
-                        check=True,
-                        timeout_sec=int(args.uv_pip_timeout or 0),
-                    )
+            def do_pip_editable():
+                print("[INFO] ensure pip exists in venv ...")
+                ensure_pip_in_venv(Path(venv_py), cwd_install, setup_out, setup_err)
+                print("[INFO] install editable via: python -m pip install -e .")
+                run_cmd(
+                    [str(venv_py), "-m", "pip", "install", "-e", ".", "-i", PYPI_INDEX_URL],
+                    cwd=cwd_install,
+                    stdout_path=setup_out,
+                    stderr_path=setup_err,
+                    check=True,
+                )
 
+            def do_uv_editable():
+                print("[INFO] install editable via: uv pip install -e .")
+                run_cmd(
+                    ["uv", "pip", "install", "--python", str(venv_py), "-e", ".", "-i", PYPI_INDEX_URL],
+                    cwd=cwd_install,
+                    stdout_path=setup_out,
+                    stderr_path=setup_err,
+                    check=True,
+                    timeout_sec=int(args.uv_pip_timeout or 0),
+                )
+
+            def run_step(step_name: str, uv_fn, pip_fn):
+                if args.install_method == "pip":
+                    pip_fn(); return
+                if args.install_method == "uv":
+                    uv_fn(); return
                 try:
-                    if args.install_method == "pip":
-                        do_pip()
-                    elif args.install_method == "uv":
-                        do_uv()
-                    else:
-                        try:
-                            do_uv()
-                        except (TimeoutError, RuntimeError) as e1:
-                            print(f"[WARN] uv pip slow/failed -> fallback to pip. reason={type(e1).__name__}")
-                            do_pip()
+                    uv_fn()
+                except (TimeoutError, RuntimeError) as e1:
+                    print(f"[WARN] {step_name}: uv failed -> fallback to pip. reason={type(e1).__name__}")
+                    pip_fn()
 
-                    installed = True
+            if not skipped_install:
+                ok_all = False
+                try:
+                    if install_mode == "requirements":
+                        run_step("requirements", do_uv_requirements, do_pip_requirements)
+                        installed = True
+                    elif install_mode == "editable":
+                        run_step("editable(-e .)", do_uv_editable, do_pip_editable)
+                        editable_installed = True
+                    ok_all = True
                 finally:
-                    if installed:
+                    if ok_all:
                         write_text(req_fingerprint_path, json.dumps(fp, indent=2, ensure_ascii=False))
+
+        # (NEW) install siinfer adapter into this venv (once per task_dir unless venv recreated/force)
+        if not args.dry_run:
+            try:
+                install_siinfer_adapter(
+                    install_script=install_script,
+                    venv_py=Path(venv_py),
+                    marker_path=siinfer_marker,
+                    stdout_path=setup_out,
+                    stderr_path=setup_err,
+                )
+                siinfer_installed = True
+            except Exception as e:
+                print(f"[ERROR] siinfer install failed for {task_id}: {e}")
+                # 这里按你原逻辑：不自动中断生成；如果你希望硬失败，改成 raise
+                siinfer_installed = False
 
         # 3) run.sh + meta
         run_sh_text, meta = generate_run_sh(
             task_id=task_id,
             task_name=task_name,
+            group=group,
             task_optional_params=optional_params,
             cfg=cfg,
             config_root=config_root,
@@ -907,6 +1074,8 @@ def main() -> None:
             default_model_name=args.model_name,
             default_openai_base_url=args.openai_base_url,
             default_openai_api_key=args.openai_api_key,
+            siinfer_repo_root=args.siinfer_repo_root,
+            siinfer_adapter_enable=args.siinfer_adapter_enable,
         )
         run_sh_path = task_dir / "run.sh"
         write_text(run_sh_path, run_sh_text)
@@ -917,10 +1086,18 @@ def main() -> None:
         meta_obj["requirements_source"] = req_source_final if req else ""
         meta_obj["requirements_installed"] = bool(installed)
         meta_obj["requirements_skipped_install"] = bool(skipped_install)
+        meta_obj["siinfer_install_script"] = str(install_script)
+        meta_obj["siinfer_marker"] = str(siinfer_marker)
+        meta_obj["siinfer_installed"] = bool(siinfer_installed or siinfer_marker.exists())
         meta_obj["group"] = group
         meta_obj["optional_params"] = optional_params
         meta_obj["python_spec"] = desired_python or ""
         meta_obj["python_actual_major_minor"] = read_venv_python_major_minor(venv_py) or ""
+        meta_obj["install_mode"] = install_mode
+        meta_obj["editable_enabled"] = bool(editable_enabled)
+        meta_obj["editable_installed"] = bool(editable_installed)
+
+
         write_text(task_dir / "meta.json", json.dumps(meta_obj, indent=2, ensure_ascii=False))
 
         # 4) run (optional)
@@ -953,8 +1130,12 @@ def main() -> None:
             "requirements_source": req_source_final if req else "",
             "installed": bool(installed),
             "skipped_install": bool(skipped_install),
+            "siinfer_installed": bool(siinfer_installed or siinfer_marker.exists()),
             "python_spec": desired_python or "",
             "python_actual_major_minor": read_venv_python_major_minor(venv_py) or "",
+            "install_mode": install_mode,
+            "editable_enabled": bool(editable_enabled),
+            "editable_installed": bool(editable_installed),
         }
 
     write_text(workspace / "summary.json", json.dumps(results, indent=2, ensure_ascii=False))

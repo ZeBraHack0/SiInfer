@@ -20,6 +20,8 @@
   ],
 
   "base__cceval": { "requirements": "", "python": "3.10" },
+  "chat__mind2web": { "requirements": "", "python": "3.10" },
+  "chat__bird-spider": { "requirements": "requirements_new.txt", "python": "" },
 
   "base": {},
   "chat": {},
