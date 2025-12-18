@@ -5,6 +5,40 @@ import re
 from typing import Iterator, Optional
 from siinfer_adapter import BenchmarkAdapter
 
+import re
+
+_SPECIAL = re.compile(r"<\|[^>]*\|>")
+
+def _normalize_completion(impl: str, task_prompt: str) -> str:
+    impl = impl or ""
+    impl = impl.replace("\t", "    ")
+
+    # 1) 若 vLLM 回的是 prompt+completion，把 prompt 剥掉
+    if task_prompt:
+        if impl.startswith(task_prompt):
+            impl = impl[len(task_prompt):]
+        else:
+            # 有些会在前面加少量模板/空白，允许 prompt 出现在靠前位置
+            pos = impl.find(task_prompt)
+            if 0 <= pos <= 200:  # 阈值可调
+                impl = impl[pos + len(task_prompt):]
+
+    # 2) 去掉所有 <|...|> 特殊 token（fim/file_sep/im_start 等）
+    impl = _SPECIAL.sub("", impl)
+
+    # 3) file_sep 常见是多段拼接：优先取“最后一个包含 def 的段”
+    if "<|file_sep|>" in impl:
+        parts = [p.strip() for p in impl.split("<|file_sep|>") if p.strip()]
+        for p in reversed(parts):
+            if "def " in p:
+                impl = p
+                break
+        else:
+            impl = parts[-1] if parts else impl
+
+    return impl.lstrip()
+
+
 
 def _read_jsonl(path: str) -> Iterator[Dict[str, Any]]:
     with open(path, "r", encoding="utf-8") as f:
@@ -128,6 +162,7 @@ class Adapter(BenchmarkAdapter):
                     n_missing_resp += 1
 
                 impl = (impl or "").replace("\t", "    ")
+                impl = _normalize_completion(impl, task_prompt)
 
                 if "```python" in impl:
                     start = impl.find("```python") + 9

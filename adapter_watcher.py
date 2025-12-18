@@ -19,22 +19,21 @@ RESPONSE_READY = "RESPONSE_READY"
 CLIENT_LOCK = ".client.lock"
 CLIENT_PID = ".client.pid"
 CLIENT_CMD = ".client.cmd"
-CLIENT_SENT = ".client.sent"          # 发送记录：存在则永不再处理
+CLIENT_SENT = ".client.sent"
 CLIENT_DONE = ".client.done"
 CLIENT_RC = ".client.rc"
-CLIENT_CONFIG = "client_config.json"  # watcher 生成的 client 配置
+CLIENT_CONFIG = "client_config.json"
 
+ENGINE_URL_FLAG = "--base-url"
 
-# 需要从 meta.jsonl 第一条里提取并透传的参数（写死 list）
-META_FORWARD_KEYS = ["max_tokens", "temperature", "top_p", "stop"]
+META_FORWARD_KEYS = ["max_tokens", "temperature", "top_p"]
 
 META_KEY_TO_FLAG = {
     "max_tokens": "--custom-output-len",
     "temperature": "--temperature",
     "top_p": "--top-p",
-    # stop 走特殊逻辑：打包进 --extra-body
+    # stop -> --extra-body dict
 }
-
 
 
 def sh_quote(s: str) -> str:
@@ -99,11 +98,6 @@ def count_jsonl_lines(path: Path) -> int:
 
 
 def parse_meta_forward_params(meta_path: Path) -> Dict[str, Any]:
-    """
-    只读 meta.jsonl 第一条；采样参数认为同一数据集一致。
-    返回：写入 client_extra 的 kv，比如：
-      { "--top-p": 1.0, "--temperature": 0.0, "--extra-body": '{"stop":[...]}', ... }
-    """
     obj = read_first_jsonl(meta_path)
     meta = obj.get("meta", {})
     out: Dict[str, Any] = {}
@@ -113,17 +107,12 @@ def parse_meta_forward_params(meta_path: Path) -> Dict[str, Any]:
             continue
 
         if k == "stop":
-            # --extra-body '{"stop":[...]}'
             stop_val = meta.get("stop")
-            print(stop_val)
             if stop_val is None:
                 continue
             if not isinstance(stop_val, list):
                 raise TypeError(f"meta.stop must be a list, got {type(stop_val)}")
-
-            extra_body = {"stop": stop_val}
-            # out["--extra-body"] = json.dumps(extra_body, ensure_ascii=False)
-            out["--extra-body"] = extra_body
+            out["--extra-body"] = {"stop": stop_val}
             continue
 
         flag = META_KEY_TO_FLAG.get(k, f"--{k.replace('_', '-')}")
@@ -132,12 +121,7 @@ def parse_meta_forward_params(meta_path: Path) -> Dict[str, Any]:
     return out
 
 
-
 def ensure_client_extra_entry(cfg: Dict[str, Any], backend_name: str) -> Dict[str, Any]:
-    """
-    cfg["client_extra"] 是 list[dict]，找到 backend==backend_name 的那条，没有就创建一条。
-    返回那条 dict 的引用。
-    """
     ce = cfg.get("client_extra")
     if ce is None:
         cfg["client_extra"] = []
@@ -207,10 +191,6 @@ class RunDir:
 
 
 def discover_run_dirs(workspace: Path) -> List[RunDir]:
-    """
-    自动发现 run_dir：
-      ${workspace}/${RUN_DIR}/adapter_runs/${SII_RUN_ID}/${SII_BENCH_NAME}/REQUEST_READY
-    """
     out: List[RunDir] = []
     if not workspace.exists():
         return out
@@ -246,26 +226,28 @@ def discover_run_dirs(workspace: Path) -> List[RunDir]:
     return out
 
 
-
-def build_client_config(base_cfg: Dict[str, Any], r: RunDir) -> Dict[str, Any]:
-    """
-    生成最终 client config：
-      - 从 base_cfg 深拷贝
-      - 覆盖 output/datapath 到当前 run_dir（保证结果写回子目录）
-      - 可选：num_prompt 自动设成 requests.jsonl 行数（更贴近真实）
-      - 将 meta.jsonl 第一条解析出的参数写入 client_extra
-    """
+def build_client_config(
+    base_cfg: Dict[str, Any],
+    r: RunDir,
+    model_name: str,
+    engine_url: str,
+) -> Dict[str, Any]:
     cfg = copy.deepcopy(base_cfg)
 
-    # 1) 强制写回当前子目录（你需求#3）
+    # 覆盖 model
+    if isinstance(cfg.get("model"), list):
+        cfg["model"] = [model_name]
+    else:
+        cfg["model"] = model_name
+
+    # 写回目录
     cfg["output"] = str(r.run_dir)
     cfg["datapath"] = str(r.run_dir)
 
-    # 2) num_prompt：如果 base 里是 [..] 列表风格，保持一致
+    # num_prompt
     try:
         nreq = count_jsonl_lines(r.requests_path) if r.requests_path.exists() else None
         if nreq is not None:
-            # 兼容两种写法：num_prompt: [512] 或 num_prompt: 512
             if isinstance(cfg.get("num_prompt"), list):
                 cfg["num_prompt"] = [nreq]
             else:
@@ -273,29 +255,26 @@ def build_client_config(base_cfg: Dict[str, Any], r: RunDir) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # 3) 注入 client_extra（所有 meta 参数都塞进去）
-    # backend 名：优先取 cfg["backend"][0]，否则默认 "vllm"
     backend_name = "vllm"
     b = cfg.get("backend")
     if isinstance(b, list) and b:
         backend_name = str(b[0])
 
-    meta_flags = parse_meta_forward_params(r.meta_path)
     ce_item = ensure_client_extra_entry(cfg, backend_name)
+
+    # 仅当 engine_url 非空时写入
+    if isinstance(engine_url, str) and engine_url.strip():
+        ce_item[ENGINE_URL_FLAG] = engine_url.strip()
+
+    # meta 参数
+    meta_flags = parse_meta_forward_params(r.meta_path)
     for flag, val in meta_flags.items():
         ce_item[flag] = val
-
-    # （可选）你也可以把 requests/meta/response 路径塞进 cfg 里，方便 client 读取
-    # 但你给的 schema 里没有这些字段，所以这里不强行加；后续你定 schema 再对齐。
 
     return cfg
 
 
 def build_cmd(cmd_template: str, r: RunDir) -> str:
-    """
-    cmd-template 可用占位符（会自动 quote 路径）：
-      {run_dir} {requests_path} {meta_path} {responses_path} {config_path}
-    """
     mapping: Dict[str, str] = {
         "run_dir": sh_quote(str(r.run_dir)),
         "requests_path": sh_quote(str(r.requests_path)),
@@ -307,13 +286,6 @@ def build_cmd(cmd_template: str, r: RunDir) -> str:
 
 
 def launch_background(r: RunDir, cmd: str) -> int:
-    """
-    启动后台进程：
-      - 无论成功/失败，只要进程退出就 touch RESPONSE_READY
-      - 总是 touch .client.done（表示 watcher 已完成该目录的 client 生命周期）
-      - rc 写入 .client.rc
-      - 不再生成 RESPONSE_FAILED / .client.fail
-    """
     r.run_dir.mkdir(parents=True, exist_ok=True)
 
     wrapper = f"""
@@ -343,8 +315,6 @@ exit "$rc"
     return p.pid
 
 
-
-
 def load_pid(r: RunDir) -> Optional[int]:
     try:
         return int(r.pid_path.read_text(encoding="utf-8").strip())
@@ -362,9 +332,6 @@ def count_active(runs: List[RunDir]) -> int:
 
 
 def maybe_recover_prelaunch_stale_lock(r: RunDir, verbose: bool = False) -> None:
-    """
-    只回收“安全”的陈旧锁：lock 存在但 sent 不存在且 pid 不存在/已死
-    """
     if not r.lock_path.exists():
         return
     if r.sent_path.exists():
@@ -399,8 +366,6 @@ def should_start(r: RunDir) -> Tuple[bool, str]:
     return True, "ok"
 
 
-
-
 def load_base_config(path: Path) -> Dict[str, Any]:
     obj = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(obj, dict):
@@ -412,6 +377,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--workspace", required=True, help="workspace root to scan")
     ap.add_argument("--base-config", required=True, help="path to base client config json")
+    ap.add_argument("--model-name", required=True, help="model name/path to write into client_config.json")
+
+    # URL 允许为空：默认空串；传空则不写入 client_extra
+    ap.add_argument("--engine-url", default="", help="engine url to write into client_extra (optional)")
+
     ap.add_argument("--cmd-template", required=True,
                     help="client launch command template. "
                          "You can use {config_path} {run_dir} {requests_path} {meta_path} {responses_path}")
@@ -432,7 +402,8 @@ def main():
         runs = discover_run_dirs(workspace)
         runs.sort(key=lambda x: str(x.run_dir))
 
-        print("discover runs: ", len(runs))
+        if args.verbose:
+            print("[watcher] discover runs:", len(runs))
 
         for r in runs:
             maybe_recover_prelaunch_stale_lock(r, verbose=args.verbose)
@@ -452,9 +423,13 @@ def main():
             if not atomic_create_lock(r.lock_path):
                 continue
 
-            # 1) 先生成 config（写到该子目录）
             try:
-                cfg = build_client_config(base_cfg, r)
+                cfg = build_client_config(
+                    base_cfg=base_cfg,
+                    r=r,
+                    model_name=args.model_name,
+                    engine_url=args.engine_url,
+                )
                 write_json(r.config_path, cfg)
             except Exception as e:
                 safe_unlink(r.lock_path)
@@ -462,7 +437,6 @@ def main():
                     print(f"[watcher] skip {r.run_dir} (build config failed: {e})")
                 continue
 
-            # 2) 再构造并记录启动命令（后续你定真实命令即可）
             try:
                 cmd = build_cmd(args.cmd_template, r)
                 write_text(r.cmd_path, cmd + "\n")
@@ -480,7 +454,6 @@ def main():
             pid = launch_background(r, cmd)
             write_text(r.pid_path, str(pid) + "\n")
 
-            # 发送记录：满足“已发送不再处理”
             sent_payload = f"time={int(time.time())}\npid={pid}\nconfig={r.config_path}\ncmd={cmd}\n"
             write_text(r.sent_path, sent_payload)
 
