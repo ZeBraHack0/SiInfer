@@ -3,18 +3,23 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ====== 默认值（外部不赋值时使用） ======
-DEFAULT_WORKSPACE="/volume/bhzhao/workspace"
+# ====== 默认值（不传位置参数时使用） ======
 DEFAULT_MODEL_NAME="/volume/bhzhao/Qwen2.5-Coder-32B"
-DEFAULT_URL=""   # 允许为空
-# =======================================
+DEFAULT_OUTPUT_DIR="/volume/bhzhao/workspace"
+DEFAULT_OPENAI_BASE_URL=""   # 允许为空
+DEFAULT_OPENAI_API_KEY=""    # 暂时不用，先读出来
+# =========================================
 
-# 允许外部覆盖：
-#   workspace=... model_name=... URL=... ./launch.sh
-#   WORKSPACE=... MODEL_NAME=... URL=... ./launch.sh
-workspace="${workspace:-${WORKSPACE:-$DEFAULT_WORKSPACE}}"
-model_name="${model_name:-${MODEL_NAME:-$DEFAULT_MODEL_NAME}}"
-URL="${URL:-${url:-${ENGINE_URL:-$DEFAULT_URL}}}"
+# 位置参数读取（按你要求的形式），并兼容 set -u
+MODEL_NAME="${1:-$DEFAULT_MODEL_NAME}"
+OUTPUT_DIR="${2:-$DEFAULT_OUTPUT_DIR}"
+OPENAI_BASE_URL="${3:-$DEFAULT_OPENAI_BASE_URL}"
+OPENAI_API_KEY="${4:-$DEFAULT_OPENAI_API_KEY}"
+
+# 兼容你当前脚本变量命名
+workspace="${OUTPUT_DIR}"
+model_name="${MODEL_NAME}"
+URL="${OPENAI_BASE_URL}"
 
 WATCHER_PY="${ROOT_DIR}/adapter_watcher.py"
 BASE_CONFIG="${ROOT_DIR}/base_config.json"

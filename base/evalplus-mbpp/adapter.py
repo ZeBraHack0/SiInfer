@@ -162,7 +162,7 @@ class Adapter(BenchmarkAdapter):
                     n_missing_resp += 1
 
                 impl = (impl or "").replace("\t", "    ")
-                impl = _normalize_completion(impl, task_prompt)
+                # impl = _normalize_completion(impl, task_prompt)
 
                 if "```python" in impl:
                     start = impl.find("```python") + 9
