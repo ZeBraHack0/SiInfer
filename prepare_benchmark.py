@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 # ----------------------------
 
 PYPI_INDEX_URL = "https://mirrors.aliyun.com/pypi/simple"
+DEFAULT_PYTHON = "python3.12"
 
 
 def sha256_if_exists(p: Optional[Path]) -> str:
@@ -749,7 +750,7 @@ def main() -> None:
     ap.add_argument("--workspace", required=True, help="Where to put per-task folders (run.sh, logs, meta)")
     ap.add_argument("--venv-root", required=True, help="Where to create per-task uv venvs")
     ap.add_argument("--output-root", required=True, help="Unified output root dir; each task uses output-root/<task_id>")
-    ap.add_argument("--python", default="", help="Default python for uv venv (can be overridden per-task via requirements-map)")
+    ap.add_argument("--python", default=DEFAULT_PYTHON, help="Default python for uv venv (can be overridden per-task via requirements-map)")
     ap.add_argument("--model-name", default="dummy-model", help="Default MODEL_NAME used in run.sh (can override at runtime)")
     ap.add_argument("--openai-base-url", default="http://127.0.0.1:8000/v1", help="Default OPENAI_BASE_URL used in run.sh")
     ap.add_argument("--openai-api-key", default="EMPTY", help="Default OPENAI_API_KEY used in run.sh")
