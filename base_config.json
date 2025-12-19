@@ -13,7 +13,10 @@
     "role": "client",
     "client_extra": [
         {
-            "backend": "vllm"
+            "backend": "vllm",
+            "--disable-shuffle": "",
+            "--no-oversample": "",
+            "--skip-chat-template": ""
         }
     ],
     "override":   false,
